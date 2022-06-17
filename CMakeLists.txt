@@ -9,7 +9,7 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(GLEW REQUIRED)
 
-add_executable(GC_LAB02 main.cpp)
+add_executable(GC_LAB02 main.cpp objfile.h objfile.cpp)
 
 INCLUDE_DIRECTORIES(${QT_QTOPENGL_INCLUDE_DIRS}
                     ${OPENGL_INCLUDE_DIRS}

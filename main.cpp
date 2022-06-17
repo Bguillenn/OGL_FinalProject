@@ -7,6 +7,7 @@
 #include <glm/glm.hpp> //Matematicas 3D
 
 //LIBRERIAS PROPIAS
+#include "objfile.h"
 
 int main()
 {
@@ -48,17 +49,37 @@ int main()
     glBindVertexArray(VertexArrayID); */
 
     //Arreglo de 3 vectores que representan 3 vertices
-    std::vector<glm::vec3> vertices = {
+    /*std::vector<glm::vec3> vertices = {
                                         glm::vec3(0.0f, 0.5f, 0.0f),
                                         glm::vec3(0.5f, -0.5f, 0.0f),
                                         glm::vec3(-0.5f, -0.5f, 0.0f)
-                                        };
+                                        }; */
+
+    //LEEMOS ARCHIVO OBJ Y ESTABLECEMOS LOS VERTICES EN BASE A LOS INDICES
+    std::string filename = "/home/kali/stanford-bunny.obj";
+    OBJFile model{filename};
+    OBJFile::Vertices all_vertices = model.GetVertices();
+    OBJFile::Indices faces = model.GetIndices();
+
+    OBJFile::Vertices vertices{};
+
+    //CREAMOS LOS VERTICES
+
+    for(int i=0; i<faces.size(); i++){
+
+        int index = faces[i][0] - 1;
+
+        vertices.push_back(all_vertices[index] * 10.0f);
+    }
+
+    const unsigned int n_ver = vertices.size();
+    std::cout << n_ver << std::endl;
 
     GLuint vbo;
     glGenBuffers(1, &vbo);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * 3, &vertices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * n_ver, &vertices[0], GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0,3,GL_FLOAT, GL_FALSE, 0, nullptr);
 
@@ -107,6 +128,19 @@ int main()
 
     //END SHADERS
 
+
+    //FISICAS
+    std::vector<glm::vec3> velocities(n_ver, glm::vec3(0.0f));
+    std::vector<float> mass(n_ver, 1.0f);
+
+    glm::vec3 gravity(0.0f, -0.98f, 0.0f);
+
+    float h = 0.0002;
+    float time = 0;
+
+
+
+
     //Capturamos la tecla escape para cerrar la ventana
     glfwSetInputMode(window, GLFW_STICKY_KEYS, GL_TRUE);
 
@@ -117,11 +151,20 @@ int main()
         glClearColor(0.25, 0.25, 0.25, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        //Dibujamos el triangulo
+        //ACTUALIZAMOS LAS FISICAS
+        for(unsigned int i=0; i <velocities.size(); i++)
+            velocities[i] = velocities[i] + h*(gravity/mass[i]);
+        for(unsigned int i=0; i<vertices.size(); i++)
+            vertices[i] = vertices[i] + velocities[0] * time;
+
+        time+=h;
 
 
 
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBufferData(GL_ARRAY_BUFFER, n_ver * 3 * sizeof(float)  , &vertices[0], GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0,3, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glDrawArrays(GL_TRIANGLES, 0, n_ver);
 
 
         //Intercambiamos buffers y escuchamos eventos de la ventana
