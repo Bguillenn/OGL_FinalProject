@@ -5,6 +5,8 @@
 #include <GL/glew.h> //Magia de OpenGL
 #include <GLFW/glfw3.h> //Manejo de ventanas y teclad
 #include <glm/glm.hpp> //Matematicas 3D
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 //LIBRERIAS PROPIAS
 #include "objfile.h"
@@ -43,43 +45,42 @@ int main()
         return -1;
     }
 
-    /*
-    GLuint VertexArrayID;
-    glGenVertexArrays(1, &VertexArrayID);
-    glBindVertexArray(VertexArrayID); */
-
-    //Arreglo de 3 vectores que representan 3 vertices
-    /*std::vector<glm::vec3> vertices = {
-                                        glm::vec3(0.0f, 0.5f, 0.0f),
-                                        glm::vec3(0.5f, -0.5f, 0.0f),
-                                        glm::vec3(-0.5f, -0.5f, 0.0f)
-                                        }; */
 
     //LEEMOS ARCHIVO OBJ Y ESTABLECEMOS LOS VERTICES EN BASE A LOS INDICES
     std::string filename = "/home/kali/stanford-bunny.obj";
     OBJFile model{filename};
     OBJFile::Vertices all_vertices = model.GetVertices();
+    OBJFile::Normals all_normals = model.GetNormals();
     OBJFile::Indices faces = model.GetIndices();
 
     OBJFile::Vertices vertices{};
+    OBJFile::Normals normals{};
 
-    //CREAMOS LOS VERTICES
-
+    //CARGAMOS LOS VERTICES Y NORMALES
     for(int i=0; i<faces.size(); i++){
-
-        int index = faces[i][0] - 1;
-
-        vertices.push_back(all_vertices[index] * 10.0f);
+        int indexVertex = faces[i][0] - 1;
+        int indexNormal = faces[i][2] - 1;
+        vertices.push_back(all_vertices[indexVertex] * 30.0f);
+        normals.push_back(all_normals[indexNormal] * 30.0f);
     }
 
+
+
     const unsigned int n_ver = vertices.size();
-    std::cout << n_ver << std::endl;
+    const unsigned int n_nor = normals.size();
+    std::cout <<"N. VERTICES: " << n_ver << std::endl;
+    std::cout <<"N. NORMALES: " << n_nor << std::endl;
 
-    GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-
+    GLuint vbo[2];
+    glGenBuffers(1, &vbo[0]);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * n_ver, &vertices[0], GL_STATIC_DRAW);
+
+    glGenBuffers(1, &vbo[1]);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * n_nor, &normals[0], GL_STATIC_DRAW);
+
+
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0,3,GL_FLOAT, GL_FALSE, 0, nullptr);
 
@@ -87,20 +88,61 @@ int main()
 
     //Realizamos la creacion de los shader VertexShader y FragmentShader
     const char* vertexShaderSrc =
-                "#version 400\n"
-                "in vec4 position;"
-                "void main()"
-                "{"
-                     "gl_Position = position;"
-                "}";
+                        "#version 400\n"
+                        "uniform mat4 projMat;" //projection
+                        "uniform mat4 mvMat;" // model-view
+
+                        "layout (location=0) in vec3 vertPos;"
+                        "layout (location=1) in vec3 vertNormal;"
+
+                        "out vec4 varyingColor;"
+
+                        "struct PositionalLight"
+                        "{ vec4 ambient;"
+                        "vec4 diffuse;"
+                        "vec4 specular;"
+                        "vec3 position;"
+                        "};"
+
+                        "struct Material"
+                        "{ vec4 ambient;"
+                        "vec4 diffuse;"
+                        "vec4 specular;"
+                        "float shininess;"
+                        "};"
+
+
+                        "uniform vec4 globalAmbient;"
+                        "uniform PositionalLight light;"
+                        "uniform Material material;"
+                        "uniform mat4 norm_matrix;" // for transforming normals
+
+                        "void main()"
+                        "{"
+
+                        "vec4 P = mvMat * vec4(vertPos,1.0);"
+
+                        "vec3 N = normalize((norm_matrix * vec4(vertNormal,1.0)).xyz);"
+                        "vec3 L = normalize(light.position - P.xyz);"
+                        "vec3 V = normalize(-P.xyz);"
+                        "vec3 R = reflect(-L,N);"
+
+                        "vec3 ambient = ((globalAmbient * material.ambient) + (light.ambient * material.ambient)).xyz;"
+                        "vec3 diffuse = light.diffuse.xyz * material.diffuse.xyz * max(dot(N,L), 0.0);"
+                        "vec3 specular= material.specular.xyz * light.specular.xyz * pow(max(dot(R,V), 0.0f), material.shininess);"
+                        "varyingColor = vec4((ambient + diffuse + specular), 1.0);"
+                        "gl_Position = projMat*mvMat*vec4(vertPos, 1.0);"
+
+                        "}";
 
     const char* fragmentShaderSrc =
-                "#version 400\n"
-                "out vec4 color;"
-                "void main()"
-                "{"
-                     "color = vec4(0.5, 0.0, 0.0, 1.0);"
-                "}";
+                        "#version 400\n"
+                        "out vec4 color;"
+                        "in vec4 varyingColor;"
+                        "void main()"
+                        "{"
+                        "color = varyingColor;"
+                        "}";
 
     //Creamos los objetos que compilaran los shaders con la funcion CreateShader
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
@@ -126,19 +168,54 @@ int main()
     glLinkProgram(shaderProgram);
     glUseProgram(shaderProgram);
 
-    //END SHADERS
+    //END SHADER
+
 
 
     //FISICAS
     std::vector<glm::vec3> velocities(n_ver, glm::vec3(0.0f));
     std::vector<float> mass(n_ver, 1.0f);
 
-    glm::vec3 gravity(0.0f, -0.98f, 0.0f);
+    glm::vec3 gravity(0.0f, 0.0f /*-0.98f*/, 0.0f);
 
     float h = 0.0002;
     float time = 0;
 
 
+
+
+    // LUCES
+
+    //projection
+
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+    float aspect =static_cast<float>(width)/static_cast<float>(height);
+    glm::mat4 projMat = glm::perspective(1.0472f, aspect, 0.1f, 1000.0f);
+    GLuint projLoc = glGetUniformLocation(shaderProgram, "projMat");
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projMat));
+
+    //light
+
+
+    // SILVER material - ambient, diffuse, specular, and shininess
+    //material
+    float matAmbSilver[4] = {0.1923f, 0.1923f, 0.1923f, 1}; //RGB-A
+    float matDifSilver[4] = {0.5075f, 0.5075f, 0.5075f, 1};
+    float matSpeSilver[4] = {0.5083f, 0.5083f, 0.5083f, 1};
+    float matShiSilver = 51.2f;
+
+    //light source
+    // white light properties
+    float globalAmbient[4] = {0.7f, 0.7f, 0.7f, 1.0f };
+
+    float lightAmbient[4]  = {0.0f, 0.0f, 0.0f, 1.0f };
+    float lightDiffuse[4]  = {1.0f, 1.0f, 1.0f, 1.0f };
+    float lightSpecular[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+
+    glm::vec3 currentLightPos, lightPosV; // light position as Vector3f, in both model and view space
+    float lightPos[3];
 
 
     //Capturamos la tecla escape para cerrar la ventana
@@ -151,6 +228,57 @@ int main()
         glClearColor(0.25, 0.25, 0.25, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
 
+
+        //TRATAMOS LAS LUCES
+
+        GLuint mvLoc = glGetUniformLocation(shaderProgram, "mvMat");
+
+        glm::mat4 viewMat = glm::translate(glm::mat4(1.f), glm::vec3(0.f, 0.f, -7.f)); //cam/>for all objects (scene)
+        auto modelMatPy = glm::translate(glm::mat4(1.f), glm::vec3(0.f, -2.f, 0.f)); //obj->pyramid
+        auto mvMat = viewMat*modelMatPy;
+
+        glUniformMatrix4fv(mvLoc, 1, GL_FALSE, glm::value_ptr(mvMat));
+
+
+
+        //light pyramid
+
+
+        GLuint globalAmbLoc, ambLoc, diffLoc, specLoc, posLoc, mAmbLoc, mDiffLoc, mSpecLoc, mShiLoc;
+        globalAmbLoc = glGetUniformLocation(shaderProgram, "globalAmbient");
+        ambLoc = glGetUniformLocation(shaderProgram, "light.ambient");
+        diffLoc = glGetUniformLocation(shaderProgram, "light.diffuse");
+        specLoc = glGetUniformLocation(shaderProgram, "light.specular");
+        posLoc = glGetUniformLocation(shaderProgram, "light.position");
+        mAmbLoc = glGetUniformLocation(shaderProgram, "material.ambient");
+        mDiffLoc = glGetUniformLocation(shaderProgram, "material.diffuse");
+        mSpecLoc = glGetUniformLocation(shaderProgram, "material.specular");
+        mShiLoc = glGetUniformLocation(shaderProgram, "material.shininess");
+        GLuint nLoc = glGetUniformLocation(shaderProgram, "norm_matrix");
+
+        currentLightPos = glm::vec3(5.0f, 5.0f, 2.0f);
+        lightPosV = glm::vec3(viewMat * glm::vec4(currentLightPos, 1.0));
+        lightPos[0] = lightPosV.x;
+        lightPos[1] = lightPosV.y;
+        lightPos[2] = lightPosV.z;
+
+        glm::mat4 invTrMat = glm::transpose(glm::inverse(mvMat)); //model-view for normals
+
+
+
+        glProgramUniform4fv(shaderProgram, globalAmbLoc, 1, globalAmbient);
+        glProgramUniform4fv(shaderProgram, ambLoc, 1, lightAmbient);
+        glProgramUniform4fv(shaderProgram, diffLoc, 1, lightDiffuse);
+        glProgramUniform4fv(shaderProgram, specLoc, 1, lightSpecular);
+        glProgramUniform3fv(shaderProgram, posLoc, 1, lightPos);
+        glProgramUniform4fv(shaderProgram, mAmbLoc, 1, matAmbSilver);
+        glProgramUniform4fv(shaderProgram, mDiffLoc, 1, matDifSilver);
+        glProgramUniform4fv(shaderProgram, mSpecLoc, 1, matSpeSilver);
+        glProgramUniform1f(shaderProgram, mShiLoc, matShiSilver);
+        glUniformMatrix4fv(nLoc, 1, GL_FALSE, glm::value_ptr(invTrMat));
+
+
+
         //ACTUALIZAMOS LAS FISICAS
         for(unsigned int i=0; i <velocities.size(); i++)
             velocities[i] = velocities[i] + h*(gravity/mass[i]);
@@ -161,9 +289,18 @@ int main()
 
 
 
-        glBufferData(GL_ARRAY_BUFFER, n_ver * 3 * sizeof(float)  , &vertices[0], GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo[0]); //VERTICES POSITIONS
+        glBufferData(GL_ARRAY_BUFFER, n_ver*3 * sizeof(float)  , &vertices[0], GL_STATIC_DRAW);
         glVertexAttribPointer(0,3, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo[1]); //NORMALS POSITIONS
+        glBufferData(GL_ARRAY_BUFFER, n_nor*3 * sizeof(float)  , &normals[0], GL_STATIC_DRAW);
+        glVertexAttribPointer(1,3, GL_FLOAT, GL_FALSE, 0, nullptr);
+        glEnableVertexAttribArray(1);
+
+
         glDrawArrays(GL_TRIANGLES, 0, n_ver);
 
 
