@@ -11,6 +11,26 @@
 //LIBRERIAS PROPIAS
 #include "objfile.h"
 
+void drawWalls()
+{
+
+    glColor3f(1,0,0);
+    glPushMatrix();
+    //glRotatef(0,0,0,1);
+    //glScalef(2,1,2);
+    glBegin(GL_QUADS);
+    /* Floor */
+    glVertex3f(-1,-1,-1);
+    glVertex3f(-1,-1,1);
+    glVertex3f(1,-1,1);
+    glVertex3f(1,-1,-1);
+
+    glEnd();
+
+    glPopMatrix();
+
+}
+
 int main()
 {
     //INICIALIZAMOS GLFW
@@ -47,7 +67,7 @@ int main()
 
 
     //LEEMOS ARCHIVO OBJ Y ESTABLECEMOS LOS VERTICES EN BASE A LOS INDICES
-    std::string filename = "/home/kali/stanford-bunny.obj";
+    std::string filename = "/home/denis/stanfordBunny.obj";
     OBJFile model{filename};
     OBJFile::Vertices all_vertices = model.GetVertices();
     OBJFile::Normals all_normals = model.GetNormals();
@@ -170,19 +190,25 @@ int main()
 
     //END SHADER
 
+    //Valores de giro de la cámara
+    float cameraX = 2.f;
+    float cameraY = 0.f;
+    float cameraZ = 7.f;
 
+    glm::mat4 mMat, vMat, mvMat, pMat;
+    float angle=0;
 
     //FISICAS
     std::vector<glm::vec3> velocities(n_ver, glm::vec3(0.0f));
     std::vector<float> mass(n_ver, 1.0f);
 
-    glm::vec3 gravity(0.0f, 0.0f /*-0.98f*/, 0.0f);
+    glm::vec3 gravity(0.0f, -0.98f, 0.0f);
 
     float h = 0.0002;
     float time = 0;
 
-
-
+    int count=0;
+    int count2=0;
 
     // LUCES
 
@@ -203,6 +229,13 @@ int main()
     float matAmbSilver[4] = {0.1923f, 0.1923f, 0.1923f, 1}; //RGB-A
     float matDifSilver[4] = {0.5075f, 0.5075f, 0.5075f, 1};
     float matSpeSilver[4] = {0.5083f, 0.5083f, 0.5083f, 1};
+
+    // GOLD
+    /*
+    float matAmbSilver[4] = {0.24725f,  0.1995f,   0.0745f, 1}; //RGB-A
+    float matDifSilver[4] = {0.75164f,  0.60648f,  0.22648f, 1};
+    float matSpeSilver[4] = {0.628281f, 0.555802f, 0.366065f, 1};
+    */
     float matShiSilver = 51.2f;
 
     //light source
@@ -280,15 +313,90 @@ int main()
 
 
         //ACTUALIZAMOS LAS FISICAS
+        /*
         for(unsigned int i=0; i <velocities.size(); i++)
             velocities[i] = velocities[i] + h*(gravity/mass[i]);
         for(unsigned int i=0; i<vertices.size(); i++)
             vertices[i] = vertices[i] + velocities[0] * time;
+        */
+
+        glm::vec3 velocity;
+        float k = 1.0f;
+        float damping = 0.1f;
+        float dt = 0.01f;
+
+        //spring and dampers
+        if (count < 6){
+            count++;
+            for (int i=0;i<vertices.size();i++){
+
+                glm::vec3 gravity = glm::vec3(0, -0.98, 0)*dt;
+                glm::vec3 spring = gravity*(glm::vec3(0,0,0))*k*dt;
+                glm::vec3 dampingForce = velocity*damping;
+
+                //Calculate velocity
+                glm::vec3 acceleration = (gravity+spring-dampingForce)/mass[1];
+                velocity += acceleration;
+                vertices[i] += velocity;
+            }
+        }
+        else if (count >=6){
+            count2++;
+
+            for (int i=0;i<vertices.size();i++){
+
+                glm::vec3 gravity = glm::vec3(0, -0.98, 0)*dt;
+                glm::vec3 spring = gravity*(glm::vec3(0,0,0))*k*dt;
+                glm::vec3 dampingForce = velocity*damping;
+
+                //Calculate velocity
+                glm::vec3 acceleration = (gravity+spring-dampingForce)/mass[1];
+                velocity += acceleration;
+                vertices[i] -= velocity;
+            }
+            if (count2>=6){
+                count=0;
+            }
+        }
+        //springs and dampers
 
         time+=h;
 
+        //Rotate camera
+
+        //Obtener las matrices
+
+        GLuint projLoc  = glGetUniformLocation(shaderProgram, "projMat");
 
 
+        //Obtener la perspectiva actual
+        glfwGetFramebufferSize(window, &width, &height);
+        float aspect = static_cast<float>(width)/static_cast<float>(height);
+        pMat =  glm::perspective(1.0472f, aspect, 0.1f, 1000.0f);
+
+        //Obtener matriz modelo-vista
+        vMat = glm::translate(glm::mat4(1.f), glm::vec3(-cameraX, -cameraY, -cameraZ));
+
+        //Rotar cámara
+        glm::mat4 vRot  = glm::rotate(glm::mat4(1.f) , angle , glm::vec3(0, -1,0));
+        vMat =  vMat*vRot;
+
+        glm::mat4 mOrg = glm::translate(glm::mat4(1.f), glm::vec3(1.0f, -1.0f, 1.0f)); //offset
+        glm::mat4 mBack = glm::translate(glm::mat4(1.f), glm::vec3(-1.0f, 1.0f, -1.0f)); //offset
+
+        glm::mat4 mRot  = mBack*glm::rotate(mOrg, angle , glm::vec3(1  , 0, 0 ));
+
+        //aumentar el angulo y volver a 0 si se llega a 360
+        angle+=0.05;
+        if(angle>360) angle=0;
+
+        mMat = glm::translate(glm::mat4(1.f), glm::vec3(0.0, -2.0, 0.0))*mRot; //offset
+
+        mvMat = vMat * mMat;
+
+        glUniformMatrix4fv(mvLoc, 1, GL_FALSE,  glm::value_ptr(mvMat));
+        glUniformMatrix4fv(projLoc, 1, GL_FALSE,  glm::value_ptr(pMat));
+        //Rotate camera
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo[0]); //VERTICES POSITIONS
         glBufferData(GL_ARRAY_BUFFER, n_ver*3 * sizeof(float)  , &vertices[0], GL_STATIC_DRAW);
@@ -303,6 +411,8 @@ int main()
 
         glDrawArrays(GL_TRIANGLES, 0, n_ver);
 
+
+        drawWalls();
 
         //Intercambiamos buffers y escuchamos eventos de la ventana
         glfwSwapBuffers(window);
